@@ -1,7 +1,8 @@
 {
-  "name": "driveware-web-port",
+  "name": "rack232",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "Vanilla JS prototype controller for the dbx DriveRack family supported by DriveWare 2.6.2 (Web Serial)",
   "scripts": {
     "start": "node scripts/serve.js",

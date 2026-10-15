@@ -767,7 +767,7 @@ function createLog() {
     },
     export() {
       const lines = entries.map((e) => `${(e.t / 1000).toFixed(3)}\t${e.dir}\t${e.summary}\t${e.hex ?? ""}`);
-      const blob = new Blob([`# DriveWare web port traffic log, ${new Date().toISOString()}\n${lines.join("\n")}\n`], { type: "text/plain" });
+      const blob = new Blob([`# rack232 traffic log, ${new Date().toISOString()}\n${lines.join("\n")}\n`], { type: "text/plain" });
       const a = h("a", { href: URL.createObjectURL(blob), download: `driverack-log-${Date.now()}.txt` });
       a.click();
       URL.revokeObjectURL(a.href);

@@ -1,4 +1,4 @@
-# DriveWare web port
+# rack232
 
 A browser-based controller for the dbx DriveRack loudspeaker management systems that the
 Windows-only DriveWare 2.6.2 software supports: the DriveRack **480, 481, 482, 442, 240, 241, 260
@@ -81,4 +81,15 @@ them.
 ## Disclaimer
 
 This software is provided "as is", without warranty of any kind. Use it at your own risk.
-Independent project, not affiliated with Harman or dbx.
+
+Independent project, not affiliated with Harman or dbx. dbx, DriveRack and DriveWare are trademarks
+of Harman International, used here only to identify the hardware this software talks to. The code
+is not derived from DriveWare; the serial protocol was documented by static analysis of DriveWare
+2.6.2 for interoperability. Neither DriveWare nor the DriveRack manuals are distributed in this
+repository.
+
+Harman/dbx: if anything here is a problem, email jonathan.rehuel16@gmail.com and it will be removed.
+
+## License
+
+[MIT](LICENSE). Fonts are loaded from Google Fonts (SIL Open Font License).

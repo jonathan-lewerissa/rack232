@@ -1,4 +1,4 @@
-# DriveWare web port (prototype)
+# rack232 (prototype)
 
 Vanilla JavaScript, no build step, no dependencies. Talks to the DriveRacks that DriveWare 2.6.2
 supports (480, 481, 482, 442, 240, 241, 260, 220i) over RS-232 through the browser's Web Serial
@@ -25,7 +25,7 @@ ranges, program names and addresses are invented for testing.
 empty, build output directory **`web/public`**. Or from the CLI:
 
 ```sh
-npx wrangler pages deploy web/public --project-name driveware-web-port
+npx wrangler pages deploy web/public --project-name rack232
 ```
 
 `public/_headers` sets `Permissions-Policy: serial=(self)` and a strict CSP. Pages serves HTTPS,

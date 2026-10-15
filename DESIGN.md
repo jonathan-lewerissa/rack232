@@ -34,7 +34,8 @@ protocol.
 
 ## Type
 
-Self-hosted in `web/public/fonts/` (the CSP allows same-origin only), all SIL OFL, ~185 KB:
+Loaded from Google Fonts (the CSP allows `fonts.googleapis.com` / `fonts.gstatic.com`), all SIL
+OFL. Offline, `font-display: swap` falls back to the system stacks:
 - **Barlow** 400/600 for UI text: industrial, DIN-like, narrow enough for dense tables.
 - **JetBrains Mono** (variable) with `tabular-nums` for readouts, addresses and the traffic log:
   digits must not jump while a fader moves.

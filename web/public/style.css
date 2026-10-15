@@ -1,9 +1,4 @@
 /* Direction and the reason for each token: ../../DESIGN.md */
-/* Self-hosted (CSP allows same-origin only). SIL OFL, licenses in fonts/. */
-@font-face { font-family: "Saira"; src: url(fonts/saira.woff2) format("woff2"); font-weight: 100 900; font-stretch: 50% 125%; font-display: swap; }
-@font-face { font-family: "Barlow"; src: url(fonts/barlow-400.woff2) format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Barlow"; src: url(fonts/barlow-600.woff2) format("woff2"); font-weight: 600 700; font-display: swap; }
-@font-face { font-family: "JetBrains Mono"; src: url(fonts/jetbrains-mono.woff2) format("woff2"); font-weight: 100 800; font-display: swap; }
 :root {
   color-scheme: dark;
   /* rack: the dark chassis everything is mounted in */
