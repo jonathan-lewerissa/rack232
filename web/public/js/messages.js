@@ -3,6 +3,7 @@
 // Layouts marked "guessed" have no sender in DriveWare, so they are not backed by code.
 
 import { MESSAGE_TABLE } from "./message-table.js";
+import { UTILITY_LAYOUTS, modelFor } from "./models.js";
 
 export const MSG = {};
 export const MSG_INFO = new Map();
@@ -67,27 +68,25 @@ export const req = {
 
 // ---- replies (device -> host) ----
 
-// Device type character in SYSTEM_REPLY_DEVICE_DATA [7].
-export const DEVICE_TYPES = {
-  0x30: "DriveRack 480",
-  0x31: "DriveRack 481",
-  0x32: "DriveRack 482",
-  0x41: "DriveRack 240",
-  0x42: "DriveRack 241",
-  0x43: "DriveRack 442 (inferred)",
-  0x45: "DriveRack 260",
-  0x46: "device type 12 (unknown)",
-  0x27: "DriveRack 220i",
-};
+// Messages whose length depends on the device family rather than the message table. DriveWare
+// checks UTILITY_REPLY against the device generation (re/PROTOCOL.md 4.5).
+const LENGTH_VARIANTS = { [MSG.UTILITY_REPLY]: Object.keys(UTILITY_LAYOUTS).map(Number) };
 
 const decoders = {
-  [MSG.NETWORK_IDENTIFY]: (p) => (p.length > 2 ? { generation: p[2] } : {}),
+  // DriveWare fills in generation 1 when the payload has no generation byte.
+  [MSG.NETWORK_IDENTIFY]: (p) => ({ generation: p.length > 2 ? p[2] : 1 }),
+  // Sent by a network master (src 0): [2..17] is a bitmap of every address on the network.
+  [MSG.NETWORK_DID_CONFIG]: (p) => {
+    const addresses = [];
+    for (let a = 0; a < 128; a++) if (p[2 + (a >> 3)] & (1 << (a & 7))) addresses.push(a);
+    return { addresses };
+  },
   [MSG.SYSTEM_REPLY_DEVICE_DATA]: (p) => {
     const digits = String.fromCharCode(...p.slice(3, 7));
     return {
       firmware: /^\d{4}$/.test(digits) ? `${digits[0]}.${digits.slice(1)}` : digits,
       typeChar: String.fromCharCode(p[7]),
-      model: DEVICE_TYPES[p[7]] ?? `unknown type '${String.fromCharCode(p[7])}'`,
+      model: modelFor(p[7])?.name ?? `unknown type '${String.fromCharCode(p[7])}'`,
     };
   },
   [MSG.SYSTEM_REPLY_DEVICE_NAME]: (p) => ({ name: cstr(p, 2) }),
@@ -115,7 +114,10 @@ const decoders = {
   [MSG.PARAM_TYPE_REPLY_STRING]: (p) => ({ text: cstr(p, 5, 16).trim() }),
   [MSG.CONFIG_MUTE_STATUS_REPLY]: (p) => ({ mask: p[2] }),
   [MSG.CONFIG_SYSTEM_MUTE_REPLY]: (p) => ({ muted: p[2] === 1 || p[2] === 0x81, raw: p[2] }),
-  [MSG.UTILITY_REPLY]: (p) => ({ bytes: p.length - 2 }),
+  [MSG.UTILITY_REPLY]: (p) => {
+    const layout = UTILITY_LAYOUTS[p.length];
+    return { bytes: p.length, layout: layout?.label ?? null, securityLevel: layout?.securityLevel != null ? p[layout.securityLevel] : null };
+  },
   [MSG.ERROR_INVALID_MESSAGE]: (p) => ({ error: true, code: readU16(p, 2) }),
   [MSG.ERROR_INVALID_LENGTH]: (p) => ({ error: true, code: readU16(p, 2) }),
   [MSG.ERROR_INVALID_PARAMETER]: (p) => ({ error: true, code: readU16(p, 2) }),
@@ -126,8 +128,9 @@ export function decode(p) {
   const info = MSG_INFO.get(id);
   const out = { id, name: msgName(id), fields: {}, warning: null };
   if (!info) out.warning = "unknown message ID";
-  else if (p.length < info.min || p.length > info.max)
-    out.warning = `length ${p.length} outside ${info.min}..${info.max}`;
+  else if (LENGTH_VARIANTS[id]) {
+    if (!LENGTH_VARIANTS[id].includes(p.length)) out.warning = `length ${p.length} not one of ${LENGTH_VARIANTS[id].join(", ")}`;
+  } else if (p.length < info.min || p.length > info.max) out.warning = `length ${p.length} outside ${info.min}..${info.max}`;
   const dec = decoders[id];
   if (dec) {
     try {

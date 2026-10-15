@@ -1,8 +1,8 @@
 {
-  "name": "driverack-260-web",
+  "name": "driveware-web-port",
   "private": true,
   "type": "module",
-  "description": "Vanilla JS prototype controller for the dbx DriveRack 260 (Web Serial)",
+  "description": "Vanilla JS prototype controller for the dbx DriveRack family supported by DriveWare 2.6.2 (Web Serial)",
   "scripts": {
     "start": "node scripts/serve.js",
     "test": "node --test test/*.test.js"

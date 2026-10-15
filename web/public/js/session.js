@@ -1,27 +1,28 @@
-// Host session: address discovery, DriveWare's connect sequence, and the self-describing
-// FX/parameter walk (PROTOCOL.md 4.1-4.3). Keeps a plain-object model and emits "change".
+// One DriveRack unit: DriveWare's connect sequence and the self-describing FX/parameter walk
+// (PROTOCOL.md 4.2-4.3). Addresses come from Network, which finds the units on the link.
+// Keeps a plain-object model and emits "change".
 
 import { Emitter } from "./emitter.js";
 import { MSG, decode, req } from "./messages.js";
+import { UNKNOWN_MODEL, modelFor } from "./models.js";
 
 const ERROR_IDS = new Set([MSG.ERROR_INVALID_MESSAGE, MSG.ERROR_INVALID_LENGTH, MSG.ERROR_INVALID_PARAMETER]);
 
 export const DEFAULT_OPTIONS = Object.freeze({
-  fallbackHostAddr: 0x00, // used only if the device never sends NETWORK_IDENTIFY
-  fallbackDeviceAddr: 0x01, // DriveWare's first device slot is address 1
-  identifyWaitMs: 2000,
   replyTimeoutMs: 1500,
   quietMs: 400, // "device has finished streaming" after this long without frames
 });
 
-function emptyModel() {
+function emptyModel({ hostAddr, deviceAddr, addressesFrom, generation }) {
   return {
-    hostAddr: null,
-    deviceAddr: null,
-    addressesFrom: null, // "identify" | "fallback"
-    generation: null,
+    hostAddr,
+    deviceAddr,
+    addressesFrom, // "identify" | "network" | "fallback"
+    generation,
     firmware: null,
     model: null,
+    profile: UNKNOWN_MODEL, // models.js entry once DEVICE_DATA has arrived
+    loaded: false, // the full connect sequence has completed at least once
     deviceName: null,
     counts: null,
     programs: [],
@@ -30,6 +31,8 @@ function emptyModel() {
     muteMask: null,
     systemMute: null,
     utilityBytes: null,
+    utilityLayout: null,
+    securityLevel: null,
     fxCount: null,
     fx: [],
     // Which optional requests the device answered: true, false (timed out) or undefined.
@@ -45,25 +48,48 @@ export class Session extends Emitter {
   #lastFrameAt = 0;
   #writes = new Map(); // "fx:param" -> pending value while a write is in flight
   #labels = new Map(); // "type|name|param" -> { prompt, inputType }, reused across program loads
+  #unsubscribe;
 
-  constructor(link, options = {}) {
+  // addresses: { hostAddr, deviceAddr, addressesFrom, generation }. With anySource, frames from
+  // every address are taken as this unit's (used when the addresses are only a guess).
+  constructor(link, addresses, { anySource = false, ...options } = {}) {
     super();
     this.#link = link;
+    this.anySource = anySource;
     this.options = { ...DEFAULT_OPTIONS, ...options };
-    this.model = emptyModel();
+    this.model = emptyModel(addresses);
     this.busy = null;
-    link.on("frame", (f) => this.#onFrame(f));
-    link.on("state", (state) => {
-      this.#epoch++;
-      this.#rejectWaiters();
-      if (state === "active") this.#bringUp(this.#epoch);
-    });
+    const offFrame = link.on("frame", (f) => this.#onFrame(f));
+    const offState = link.on("state", () => this.dispose());
+    this.#unsubscribe = () => (offFrame(), offState());
+  }
+
+  // Abandons any running operation; the unit is gone or the link went down.
+  dispose() {
+    this.#unsubscribe();
+    this.#epoch++;
+    this.#rejectWaiters();
   }
 
   // ---- public actions ----
 
+  // DriveWare's attach (sent to every unit it finds) followed by the full connect sequence.
+  async attach() {
+    await this.send(req.guiIdentify());
+    await this.send(req.attach());
+  }
+
   async refresh() {
     await this.#guard(this.#epoch, () => this.#connectSequence(this.#epoch));
+  }
+
+  // Model and name only, enough to list the unit; refresh() reads the rest.
+  async identify() {
+    await this.#guard(this.#epoch, async () => {
+      this.#status("Reading device data…");
+      await this.request(req.deviceData(), MSG.SYSTEM_REPLY_DEVICE_DATA);
+      await this.request(req.deviceName(), MSG.SYSTEM_REPLY_DEVICE_NAME);
+    });
   }
 
   async loadProgram(n) {
@@ -82,7 +108,8 @@ export class Session extends Emitter {
       this.#status(`Storing "${name}" to program ${n + 1}…`);
       const r = await this.request(req.store(n, name, insert), MSG.PROGRAM_DID_STORE);
       if (!r) throw new Error("device did not confirm the store");
-      // The 260 moves a store aimed at a factory program to the matching user slot (manual 3.4).
+      // The 260 moves a store aimed at a factory program to the matching user slot (manual 3.4);
+      // other models may do the same, so read back whichever slot the device names.
       const stored = r.fields.program;
       await this.request(req.programName(stored), MSG.PROGRAM_REPLY_NAME, (d) => d.fields.program === stored);
       await this.request(req.currentProgram(), MSG.PROGRAM_REPLY_CURRENT);
@@ -150,29 +177,7 @@ export class Session extends Emitter {
     return waiter.promise;
   }
 
-  // ---- bring-up ----
-
-  async #bringUp(epoch) {
-    this.model = emptyModel();
-    this.emit("change", "all");
-    await this.#guard(epoch, async () => {
-      this.#status("Link up, waiting for NETWORK_IDENTIFY…");
-      if (this.model.hostAddr == null) {
-        await this.#wait(MSG.NETWORK_IDENTIFY, () => true, this.options.identifyWaitMs).promise;
-      }
-      this.#alive(epoch);
-      if (this.model.hostAddr == null) {
-        this.#set({
-          hostAddr: this.options.fallbackHostAddr,
-          deviceAddr: this.options.fallbackDeviceAddr,
-          addressesFrom: "fallback",
-        });
-      }
-      await this.send(req.guiIdentify());
-      await this.send(req.attach());
-      await this.#connectSequence(epoch);
-    });
-  }
+  // ---- connect sequence ----
 
   // DriveWare's connect sequence, plus the follow-ups its reply handlers trigger.
   async #connectSequence(epoch) {
@@ -197,6 +202,7 @@ export class Session extends Emitter {
     await this.request(req.utility(), MSG.UTILITY_REPLY);
     this.#alive(epoch);
     await this.#loadProgramDetail(epoch);
+    this.#set({ loaded: true });
   }
 
   // REPLY_CURRENT -> REQUEST_NAME(n), CONFIG_REQUEST_ALL(n), PARAM_REQUEST_ALL, then fill gaps.
@@ -276,6 +282,7 @@ export class Session extends Emitter {
   // ---- receive path ----
 
   #onFrame(frame) {
+    if (!this.anySource && frame.src !== this.model.deviceAddr) return;
     this.#lastFrameAt = Date.now();
     const d = decode(frame.payload);
     d.frame = frame;
@@ -288,16 +295,13 @@ export class Session extends Emitter {
   #apply({ id, fields: f }, frame) {
     const m = this.model;
     switch (id) {
-      case MSG.NETWORK_IDENTIFY:
-        // The device tells us our address in dst and its own in src.
-        this.#set({ hostAddr: frame.dst, deviceAddr: frame.src, addressesFrom: "identify", generation: f.generation ?? null });
+      case MSG.SYSTEM_REPLY_DEVICE_DATA: {
+        const profile = modelFor(frame.payload[7]) ?? UNKNOWN_MODEL;
+        // DriveWare overrides the IDENTIFY generation for the 24x and 220i (PROTOCOL.md 4.1).
+        const generation = profile.family === "24x" || profile.family === "220i" ? profile.generation : m.generation;
+        this.#set({ firmware: f.firmware, model: f.model, profile, generation });
         break;
-      case MSG.NETWORK_DID_CONFIG:
-        this.#set({ hostAddr: frame.dst });
-        break;
-      case MSG.SYSTEM_REPLY_DEVICE_DATA:
-        this.#set({ firmware: f.firmware, model: f.model });
-        break;
+      }
       case MSG.SYSTEM_REPLY_DEVICE_NAME:
         this.#set({ deviceName: f.name });
         break;
@@ -367,7 +371,7 @@ export class Session extends Emitter {
         this.#set({ systemMute: f.muted });
         break;
       case MSG.UTILITY_REPLY:
-        this.#set({ utilityBytes: f.bytes });
+        this.#set({ utilityBytes: f.bytes, utilityLayout: f.layout, securityLevel: f.securityLevel });
         break;
       case MSG.ERROR_INVALID_MESSAGE:
       case MSG.ERROR_INVALID_LENGTH:

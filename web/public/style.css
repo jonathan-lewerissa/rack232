@@ -249,6 +249,7 @@ legend { color: var(--muted); font: 700 semi-expanded 10px var(--label); text-tr
 .program-list li.current button { background: var(--current); color: var(--current-text); font-weight: 600; }
 .program-list li.current .num { color: var(--current-num); }
 .program-list li.group { position: sticky; top: 0; padding: 4px 10px; font: 700 semi-expanded 10px var(--label); text-transform: uppercase; letter-spacing: .1em; color: var(--text); background: var(--face-2); }
+.unit-list .pname small { display: block; opacity: .75; }
 .store-form { display: grid; grid-template-columns: 1fr; gap: 6px; }
 .store-form h3 { margin-bottom: 4px; }
 
@@ -344,7 +345,8 @@ input[type="range"]::-moz-range-thumb { width: 12px; height: 22px; border: 0; bo
 
 .fader-scroll { overflow-x: auto; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .2); }
 .fader-bank {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 2px; padding: 10px 8px 6px;
+  /* one row whatever the band count (28 on the 260, 31 on the 48x/24x/442); scrolls if too narrow */
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(30px, 1fr); gap: 2px; padding: 10px 8px 6px;
   /* 0 dB reference line across the bank */
   background-image: linear-gradient(to bottom, transparent calc(50% - 0.5px), var(--line) calc(50% - 0.5px), var(--line) calc(50% + 0.5px), transparent calc(50% + 0.5px));
 }
@@ -442,7 +444,7 @@ input.vfader::-moz-range-thumb { width: 22px; height: 12px; background: linear-g
   .topbar { padding-left: 26px; padding-right: 26px; }
   .log-toolbar, .raw-send { padding-left: 12px; padding-right: 12px; }
   .program-list { max-height: 220px; }
-  .fader-bank { grid-template-columns: repeat(28, 34px); width: max-content; }
+  .fader-bank { grid-auto-columns: 34px; width: max-content; }
   .flow { flex-direction: column; align-items: stretch; gap: 14px; }
   .router { width: auto; }
   .stub { display: none; }

@@ -1,10 +1,13 @@
-# DriveRack 260 serial protocol notes
+# DriveWare (DriveRack family) serial protocol notes
 
 Source: static analysis of DriveWare v2.6.2 for interoperability, plus its string and `Binary`
 resources. **Nothing here has been tested against a real device.**
 Items marked *inferred* are reasoning, not observed behaviour.
 
-Revision 3 (2026-10-14): added the link-up handshake, connect sequence, reply layouts from the
+Revision 4 (2026-10-15): covers the whole DriveWare family (480/481/482, 442, 240/241, 260, 261,
+220i). Corrected the link-up order (the device speaks first), added network discovery through
+`NETWORK_DID_CONFIG` (4.1), resolved device types 'C' and 'F', and mapped the `UTILITY_REPLY` size
+variants (4.5). Revision 3 (2026-10-14): added the link-up handshake, connect sequence, reply layouts from the
 receive handler table, and the self-describing FX/parameter model. Revision 2 corrected the header
 bytes and found the real dispatcher. Revision 1 (previous thread) had the framing and CRC right.
 
@@ -33,9 +36,12 @@ receiver and writer threads):
 Link-up (*inferred from the writer thread*): the writer idles sending 16 × 0xFF every 250 ms until it
 has received 0xFF or 0xF0 from the peer. On 0xFF it sends the 0xF0 burst; on 0xF0 it does not. It
 then posts an internal `MSG_NETWORK_EVENT_NOW_ACTIVE` to the application and starts serving the
-transmit queue. The application reacts by sending `MSG_GUI_IDENTIFY` and `MSG_SYSTEM_DO_ATTACH`
-to address 1, and the device answers with `MSG_NETWORK_IDENTIFY`, from which
-DriveWare learns both addresses (section 4.1).
+transmit queue. It still cannot send anything: the send function drops every frame whose `dst` is
+not in a 128-bit "allowed destinations" bitmap, and that bitmap is empty until a device speaks
+(`FUN_004189a0`). A single unit sends `MSG_NETWORK_IDENTIFY`; a network master sends
+`MSG_NETWORK_DID_CONFIG` (section 4.1). Only then does DriveWare send `MSG_GUI_IDENTIFY`,
+`MSG_SYSTEM_DO_ATTACH` and `MSG_SYSCON_CONFIG_REQUEST` to each unit it learned about. Revision 3
+had this backwards (host first, to address 1).
 
 ## 3. Frame format
 
@@ -77,15 +83,64 @@ the first byte after the ID.
 
 ### 4.1 Addresses and identification
 
-- `MSG_NETWORK_IDENTIFY` (0x0002, from the device): DriveWare sets its own address from the
-  frame's `dst` and the device address from `src`; payload `[2]` is a "protocol generation" byte
-  that later selects reply-size variants (values 2, 3 and 4 appear in the code).
+Two ways a link announces itself. DriveWare accepts both on any link:
+
+- `MSG_NETWORK_IDENTIFY` (0x0002, reliable, from a single unit): DriveWare sets its own address
+  from the frame's `dst` and the unit's from `src`, and allows only that destination. Payload `[2]`
+  is the protocol generation; a 2-byte IDENTIFY counts as generation 1. The generation is stored
+  only once per link.
+- `MSG_NETWORK_DID_CONFIG` (0x0001, 18 bytes, only accepted from `src` 0, the network master):
+  DriveWare sets its own address from `dst`. Payload `[2..17]` is a 128-bit bitmap of every
+  address on the network (bit n = `[2 + n/8] & (1 << n%8)`), copied straight into the
+  allowed-destinations bitmap (`FUN_004187d0`).
+
+Either one triggers `CDRDoc::Event_Routing_Reconfigured`. It walks addresses 0..99 and checks
+0x7D, and for each address present sends `GUI_IDENTIFY`, `SYSTEM_DO_ATTACH` and
+`SYSCON_CONFIG_REQUEST`, then runs the connect sequence (4.2) if the address is below 100.
+DriveWare never polls addresses. Replies are routed to a unit by the frame's `src`.
+
+Address = unit ID:
+
+| Address | Meaning | Source |
+|---|---|---|
+| 0x00 | Network master ("Network Master Device") | decompiled.c ~6689 |
+| 0x01..0x63 | Slave with that ID; 0x01 is also where the 260 and 220i always live | ~6698, 6448, 7536 |
+| 0x6F | System control (internal device type 9) | ~7446 |
+| 0x7D | 480R remote unit (type 4); only it may send 0x4E/0x4F/0xC3 and the 16-byte `UTILITY_REPLY` | ~6782, 15571 |
+| 0x7F | Broadcast: `SYSCON_REQUEST` 0x47, system mute 0xB5, SYSCON 0x44 | ~1684, 7097 |
+
+Generation selects the path in `Event_Routing_Reconfigured`: 3 = 260 (single unit at address 1),
+4 = 220i, 1 or 2 = the network path used for the 48x/442 and the 24x.
+
 - `MSG_SYSTEM_REPLY_DEVICE_DATA` (0x001B, 10 bytes): `[3..6]` are ASCII digits of the firmware
-  version ("1510" = 1.510), `[7]` is a device-type character. Known mapping in
-  DriveWare: '0','1','2' = 480/481/482; 'A','B' = 240/241; 'C' = type 10 (442, *inferred*);
-  'E' = type 11, which the detection code pairs with "DriveWare has detected a DriveRack 260";
-  'F' = type 12; '\'' = type 13 (220i).
+  version ("1510" = 1.510), `[7]` is a device-type character. No other bytes are read.
+  DriveWare forces generation 2 for 'A'/'B' and 4 for '\''.
+
+  | `[7]` | Type | Model | Family | Outputs | DriveWare built for |
+  |---|---|---|---|---|---|
+  | '0' / '1' / '2' | 1 / 2 / 3 | DriveRack 480 / 481 / 482 | 48x | 8 | 2.500 |
+  | — | 4 | 480R remote (always address 0x7D) | — | — | |
+  | 'A' / 'B' | 5 / 6 | DriveRack 240 / 241 | 24x | 4 | 1.060 |
+  | — | 9 | System control (address 0x6F) | — | — | |
+  | 'C' | 10 | DriveRack 442 | 442 | 4 (mute bits 4-7 skipped) | |
+  | 'E' | 11 | DriveRack 260 | 260 | 6 | 1.510 |
+  | 'F' | 12 | DriveRack 261 (`FUN_004b7e00`, treated with the 260) | 260 | 6 (*inferred*) | |
+  | '\'' | 13 | DriveRack 220i | 220i | 2 | 1.01 |
+
+  Detecting a model removes incompatible ones from the session: a 48x/442 removes any 24x, and a
+  24x/260/261 removes 48x, 480R and 442 devices. 442 and 48x programs are mutually incompatible.
+  The firmware warning ("old version of firmware") has a single threshold, 1.301, for every
+  model, and looks disabled by a global flag.
 - `MSG_SYSTEM_REPLY_DEVICE_NAME` (0x001E): `[2..]` NUL-terminated name.
+
+Per-family data that DriveWare carries but the device does not report:
+
+- Built-in FX tables giving each parameter's input type (48x: 124 FX types, 24x: 159, 442: 124,
+  system control: 161, 260: 118, 220i: 46). DriveWare only asks `PARAM_REQUEST_INPUT_TYPE` /
+  `PROMPT_STRING` (0x97/0x99) when its table has no entry, so older families may not answer them.
+- Program banks (`Binary` resources 198 = 48x, 229 = 24x, 293 = 442): 31-band GEQs in all three;
+  crossover slopes 0..3 (input type 0x21/0x22 on the 48x, 0x58 on the 24x, 0x23 on the 442's
+  linked filters); output gain 0x3F seen from 7 to 137.
 
 ### 4.2 Connect sequence (sent to the device address, all reliable)
 
@@ -153,10 +208,18 @@ can render any value to text through 0xA3/0xA4, so a client does not need its ow
 - `CONFIG_MUTE_STATUS_REQUEST` 0xB3 → `REPLY` 0xB4: `[2]` = output mute bitmask;
   `CONFIG_WRITE_MUTE_STATUS` 0xB8 writes it. `CONFIG_SYSTEM_MUTE_*` (0xB5..0xB7) is the
   global mute (`[2]` = 1 muted; 0x81 also treated as muted).
-- `UTILITY_REQUEST` 0xC0 → `UTILITY_REPLY` 0xC1 (76 bytes): security levels, power-up modes,
-  program list, zone-controller setup, LCD contrast. DriveWare sends it back in four size variants
-  (0x10, 0x4C, 0x65, 0xDB bytes) chosen by device generation; the 260 variant still needs to be
-  identified on hardware.
+- `UTILITY_REQUEST` 0xC0 → `UTILITY_REPLY` 0xC1: security, power-up and program-list settings,
+  written back with `UTILITY_REPLY`. The length table says 76 bytes, but `FUN_0041a480` accepts a
+  size per device (offsets below include the 2-byte message ID):
+
+  | Length | Who | Layout |
+  |---|---|---|
+  | 0x10 (16) | 480R remote at 0x7D only | not mapped |
+  | 0x4C (76) | 48x, 442 | `[4..20]` 17 per-function lock levels, `[21..36]`/`[37..52]` high/medium passwords, `[53]` security level, `[54..63]` program list, `[64]` list size, `[65]` bit 0 list mode (*inferred*), `[68..75]` power-up mute, redundancy, load stored, mic pre, MIDI channel, SysEx ID (order not mapped) |
+  | 0x65 (101) | 24x (generation 2) | the 0x4C layout plus `[76..100]`, probably switch-closure settings (*inferred*) |
+  | 0xDB (219) | 260, 220i (generation 3/4) | `[2]` = 1 on writes; 260: `[20..25]` output gain jumpers, `[26]`+`[43..59]` security page with `[59]` = security level, `[27]` list mode, `[28]` list index, `[29..38]` program list, `[39]` list size, `[41]` output mute byte, `[60..87]` passwords, `[88]`/`[89]` power-up program/mute (order *inferred*), `[93..218]` zone controller setup; 220i: `[90]` front-panel lockout |
+
+  Nothing in DriveWare mentions LCD contrast, although the 260 manual lists it as a utility setting.
 - `KPS_*`, `BUTTON_DO_PRESS` (0xA0) and `SYSCON_*` drive zone controllers, remote key presses and
   the 480R "system control" features.
 
@@ -167,8 +230,11 @@ can render any value to text through 0xA3/0xA4, so a client does not need its ow
 
 ## 5. Still unknown / to verify on hardware
 
-- The handshake order in section 2 and whether the 260 sends 0xFF unprompted.
-- The 260's device address and "protocol generation" byte.
-- The `UTILITY_REPLY` layout for the 260 and the meaning of the FX descriptor bytes in 0x75.
-- Whether the 260 firmware 1.510 answers every discovery request in 4.3 (the code paths exist for
-  all device types, so it should).
+- The handshake in section 2 on each model: does the unit send 0xFF unprompted, and does it send
+  `NETWORK_IDENTIFY` (or the master `NETWORK_DID_CONFIG`) right after link-up?
+- Each unit's address and protocol generation byte. In particular, does a lone 24x send IDENTIFY or
+  DID_CONFIG?
+- The utility layouts beyond the security level, and the meaning of the FX descriptor bytes in 0x75.
+- Whether each model answers the discovery requests in 4.3. The 48x/24x/442 matter most, since
+  DriveWare has its own FX tables for them and rarely asks.
+- Whether the 48x master forwards slave replies with the slave's address as `src` (assumed).

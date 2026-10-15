@@ -14,7 +14,7 @@ code for it; nothing has been exercised on hardware yet.
 | Configuration mode: choose crossover type, inserts, routing (3.5, A.5) | `CONFIG_DO_START`, `WRITE_NUMBER_FX`, `WRITE_FX_DATA`, `DO_END` | covered, descriptor bytes undecoded |
 | Output mutes (1.2, 5.2) | `CONFIG_MUTE_STATUS_*` bitmask, `CONFIG_SYSTEM_MUTE_*` | covered |
 | Device name | `SYSTEM_WRITE/REQUEST/REPLY_DEVICE_NAME` | covered |
-| Utility: security levels and passwords, PUP program/mute, program list, LCD contrast, output jumpers (5.1–5.5) | `UTILITY_REQUEST/REPLY` 76-byte block, written back with `UTILITY_REPLY` | covered, 260 layout to be mapped on hardware |
+| Utility: security levels and passwords, PUP program/mute, program list, LCD contrast, output jumpers (5.1–5.5) | `UTILITY_REQUEST/REPLY` 219-byte block on the 260, written back with `UTILITY_REPLY` (PROTOCOL.md 4.5); LCD contrast is not in it | read only; security level mapped, the rest partly mapped from DriveWare |
 | ZC zone controllers (5.3, 6.2) | `KPS_*`, `SYSCON_*`, part of `UTILITY_REPLY` | covered for 480R; 260 fields unknown |
 | Meters: comp/limiter gain reduction, AGC, output trims (5.6) | no `MSG_METER*` exists | **not available over serial** |
 | RTA, Auto EQ wizard, AFS wizard, System Setup wizard (2.9, A.4) | no messages; only `KPS_KEYPRESS` / `BUTTON_DO_PRESS` remote key presses | front panel only |
@@ -27,12 +27,12 @@ code for it; nothing has been exercised on hardware yet.
 
 DriveWare embeds default program banks as `Binary` resources (198 = 48x, 229 = 24x, 293 = 442) in
 MFC `CArchive` form: `CProgram` → `CFx` → `CParam(type id, name, value)`. The 260 has no bank, it
-is read from the device, but the 24x shares the 260's generation and shows the encoding style:
+is read from the device. The 24x is a different generation (2, the 260 is 3) but shows the encoding style:
 
 | Block | Parameters (type id) | Value range seen | Manual range |
 |---|---|---|---|
 | Input Mixer | MGain 0x3E, Ch1/Ch2 0x49 | 0..27 | -Inf..+20 dB |
-| GEQ (28 band) | on/off 0x0C, F 0x2A, band G 0x14/0x43 ×28, Boom/Zizz/Tilt | G 0..48, 24 = 0 dB | ±12 dB, 0.5 dB |
+| GEQ (31 band; the 260 has 28) | on/off 0x0C, F 0x2A, band G 0x14/0x43 ×31, Boom/Zizz/Tilt | G 0..48, 24 = 0 dB | ±12 dB, 0.5 dB |
 | 4 Band Post EQ | on 0x0C, Type 0x5A, Fc 0x4E/0x05/0x4F, G 0x07, Q 0x06, Q/S 0x50 | G 12..48, Q 0..15 | ±12 dB; Q 0.2..16 |
 | Crossover 2X4 etc. | High/Low Fc 0x24, Slope 0x58 | Slope 0..3 | BW/BS 6..24, LR 12..48 |
 | Comp / Limiter | on 0x00, OverEasy 0x04, Thresh 0x01, R 0x02, G 0x03, PkStop+ 0x57 | Thresh 40 = 0 dBu | -40..+20 dBu |

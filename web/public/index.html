@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DriveRack 260 · web prototype</title>
+  <title>DriveRack · DriveWare web port</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
   <script src="js/panel.js"></script>
@@ -11,7 +11,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1 class="brand"><b>DriveRack 260</b> <span>web controller</span></h1>
+    <h1 class="brand"><b>DriveRack</b> <span>web controller</span></h1>
     <div class="conn">
       <span id="link-pill" class="led pill" data-state="stopped">Disconnected</span>
       <div class="split" id="connect-group">
@@ -43,12 +43,14 @@
             <label class="check"><input type="checkbox" id="opt-passive"> Listen only (send nothing, just log)</label>
           </fieldset>
           <fieldset>
-            <legend>Addresses if the device never sends NETWORK_IDENTIFY</legend>
+            <legend>Addresses if no device identifies itself</legend>
             <label>Host (this app) <input id="opt-host" value="0x00" size="5"></label>
             <label>Device <input id="opt-dev" value="0x01" size="5"></label>
           </fieldset>
           <fieldset>
             <legend>Simulator</legend>
+            <label>Model <select id="opt-sim-model"></select></label>
+            <label title="480, 481, 482 and 442 only: units on the simulated network (master + slaves). With more than one, a 480R remote is added too.">Network units <input id="opt-sim-units" type="number" min="1" max="8" value="1" size="3"></label>
             <label class="check"><input type="checkbox" id="opt-sim-baud" checked> Throttle to 38400 baud</label>
             <label class="check"><input type="checkbox" id="opt-sim-noise"> Line noise (1 in 400 bytes corrupted)</label>
           </fieldset>

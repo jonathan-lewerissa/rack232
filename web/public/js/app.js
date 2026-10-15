@@ -2,8 +2,9 @@ import { CTRL, FrameParser } from "./frame.js";
 import { Link } from "./link.js";
 import { MSG, MSG_INFO, decode, describeFields, hex, hexBytes, msgName, payload } from "./messages.js";
 import { findBands, peqGraph } from "./peq.js";
-import { Session } from "./session.js";
-import { SimulatedDriveRack } from "./sim.js";
+import { UNKNOWN_MODEL } from "./models.js";
+import { Network } from "./network.js";
+import { SIM_MODELS, SimulatedDriveRack } from "./sim.js";
 import { SerialTransport, createLoopback } from "./transport.js";
 import { findCrossover, xoverGraph } from "./xover.js";
 
@@ -29,21 +30,13 @@ const parseNum = (s) => {
   return Number.isInteger(v) && v >= 0 ? v : null;
 };
 
-// Widget ranges seen for these input types in DriveWare's embedded 24x bank (FUNCTIONALITY.md).
-// The device does not report ranges, so other types get a plain stepper.
-const KNOWN_RANGES = {
-  0x0c: { max: 1, toggle: true },
-  0x14: { max: 48, fader: true },
-  0x43: { max: 48, fader: true },
-  0x29: { max: 36 },
-  0x58: { max: 11 }, // 24x bank uses 0..3; the 260 manual lists 12 crossover types (4.7)
-  0x06: { max: 15 },
-  0x01: { max: 60 },
-};
+// Widget ranges by input type for the connected model (models.js). The device does not report
+// ranges, so other types get a plain stepper.
+const rangeOf = (inputType) => (model()?.profile ?? UNKNOWN_MODEL).ranges[inputType];
 
 // Connection state
 
-let ctx = null; // { transport, link?, session?, sim?, kind }
+let ctx = null; // { transport, link?, network?, sim?, kind }
 let selectedFx = 0;
 const drafts = { deviceName: null, programName: null }; // text being typed survives re-renders
 const log = createLog();
@@ -73,8 +66,10 @@ function runSimulator() {
     ? (bytes) => bytes.map((b) => (Math.random() < 1 / 400 ? b ^ (1 << Math.floor(Math.random() * 8)) : b))
     : null;
   const [hostEnd, devEnd] = createLoopback({ bytesPerMs: $("opt-sim-baud").checked ? 3.84 : Infinity, corrupt });
-  const sim = new SimulatedDriveRack(devEnd);
-  log.note(`Simulator started${noise ? " with line noise" : ""}. Its device model is invented, not captured from a 260.`);
+  const units = Math.max(1, Math.min(8, parseNum($("opt-sim-units").value) ?? 1));
+  const sim = new SimulatedDriveRack(devEnd, { model: $("opt-sim-model").value, units, remote: units > 1 });
+  const what = sim.network ? `${sim.profile.name} network (${units} unit${units > 1 ? "s" : ""}${units > 1 ? " and a 480R remote" : ""})` : sim.profile.name;
+  log.note(`Simulated ${what} started${noise ? " with line noise" : ""}. Its signal chain is invented, not captured from a device.`);
   start(hostEnd, { kind: "simulator", sim });
 }
 
@@ -98,14 +93,19 @@ function start(transport, { kind, passive = false, sim = null }) {
       setPill(state, { idle: "Linking…", active: "Linked", stopped: "Disconnected" }[state]);
       if (reason) log.note(`Link ${state}: ${reason}`);
     });
-    const session = new Session(link, {
+    const network = new Network(link, {
       fallbackHostAddr: parseNum($("opt-host").value) ?? 0,
       fallbackDeviceAddr: parseNum($("opt-dev").value) ?? 1,
     });
-    session.on("status", setStatus);
-    session.on("change", onModelChange);
+    network.on("status", setStatus);
+    network.on("change", onNetworkChange);
+    network.on("session-status", (s, text) => s === session() && setStatus(text));
+    network.on("session-change", (s, kind, detail) => {
+      if (s === session()) onModelChange(kind, detail);
+      else if (kind === "model") queueRender("side"); // names and models in the unit list
+    });
     ctx.link = link;
-    ctx.session = session;
+    ctx.network = network;
     link.start();
     setStatus(`Sending hello (16 × FF every 250 ms) and waiting for the ${kind === "simulator" ? "simulator" : "DriveRack"}…`);
   }
@@ -145,7 +145,7 @@ function setPill(state, text) {
 
 function setStatus(text) {
   $("status").textContent = text;
-  $("spinner").hidden = !ctx?.session?.busy;
+  $("spinner").hidden = !session()?.busy;
 }
 
 function parseOne(bytes) {
@@ -169,6 +169,26 @@ function act(fn) {
 // Rendering
 
 let renderQueued = new Set();
+let shownSession = null;
+
+function queueRender(...what) {
+  for (const w of what) renderQueued.add(w);
+  if (!renderQueued.scheduled) {
+    renderQueued.scheduled = true;
+    requestAnimationFrame(flushRender);
+  }
+}
+
+// Units appeared or went away, or another unit was selected.
+function onNetworkChange() {
+  if (session() !== shownSession) {
+    shownSession = session();
+    selectedFx = 0;
+    drafts.deviceName = drafts.programName = null;
+    if (shownSession?.status) setStatus(shownSession.status);
+  }
+  queueRender("side", "chain");
+}
 
 function onModelChange(kind, detail) {
   if (kind === "param") {
@@ -177,14 +197,11 @@ function onModelChange(kind, detail) {
     if (chip) paintChip(chip, model().fx[detail.fx]);
     return;
   }
-  if (kind === "busy") $("spinner").hidden = !ctx?.session?.busy;
+  if (kind === "busy") $("spinner").hidden = !session()?.busy;
   if (kind !== "fx") renderQueued.add("side");
-  if (kind === "fx" || kind === "all" || kind === "supports" || kind === "busy" || (kind === "model" && "fxCount" in detail))
+  if (kind === "fx" || kind === "all" || kind === "supports" || kind === "busy" || (kind === "model" && ("fxCount" in detail || "profile" in detail)))
     renderQueued.add("chain");
-  if (!renderQueued.scheduled) {
-    renderQueued.scheduled = true;
-    requestAnimationFrame(flushRender);
-  }
+  queueRender();
 }
 
 function flushRender() {
@@ -209,20 +226,43 @@ function renderSidebar() {
   renderPrograms();
 }
 
-const model = () => ctx?.session?.model ?? null;
+const session = () => ctx?.network?.selected ?? null;
+const model = () => session()?.model ?? null;
 
 function kv(label, value, title, cls = "kv") {
   return h("div", { class: cls, title }, h("span", { class: "k" }, label), h("span", { class: "v" }, value ?? "?"));
 }
 
+// Units found on the link. Shown when there is more than one address, i.e. a 48x/442 network.
+function unitList() {
+  const net = ctx?.network;
+  if (!net || net.addresses.length < 2) return null;
+  const busy = !!session()?.busy;
+  return h("ol", { class: "program-list unit-list", "aria-label": "Units on this link" },
+    net.nodes.map(({ addr: a, label, session: s }) => {
+      const current = s && s === session();
+      const what = s ? [s.model.model ?? "…", s.model.deviceName].filter(Boolean).join(" · ") : "not editable";
+      return h("li", { class: current ? "current" : "" },
+        h("button", {
+          class: "link", disabled: !s || current || busy,
+          title: s ? (current ? "Unit being edited" : "Edit this unit") : "Only DriveRack units (ID 0-99) can be edited",
+          onclick: () => net.select(a),
+        }, h("span", { class: "num" }, addr(a)), h("span", { class: "pname" }, h("b", {}, label), " ", h("small", {}, what))));
+    }));
+}
+
 function renderDevice() {
   const m = model();
   const el = $("device-card");
-  el.replaceChildren(h("h2", {}, "Device"));
+  el.replaceChildren(h("h2", {}, ctx?.network?.addresses.length > 1 ? "Network" : "Device"));
+  const units = unitList();
+  if (units) el.append(units);
   if (!m) {
-    el.append(h("p", { class: "muted" }, ctx ? "Listening only." : "Connect a DriveRack over a null-modem cable, or run the simulator."));
+    el.append(h("p", { class: "muted" }, !ctx ? "Connect a DriveRack over a null-modem cable, or run the simulator."
+      : ctx.network ? "Waiting for a unit to identify itself…" : "Listening only."));
     return;
   }
+  const p = m.profile;
   const yesNo = (v) => (v === true ? "yes" : v === false ? "no reply" : "not asked yet");
   const nameInput = h("input", {
     value: drafts.deviceName ?? m.deviceName ?? "", maxlength: 16, "aria-label": "Device name", disabled: m.deviceName == null,
@@ -230,15 +270,21 @@ function renderDevice() {
   });
   el.append(
     kv("Model", m.model, null, "kv big"),
-    kv("Firmware", m.firmware),
-    h("form", { class: "inline-form", onsubmit: act(async (e) => { e.preventDefault(); drafts.deviceName = null; await ctx.session.renameDevice(nameInput.value); }) },
+    kv("Firmware", m.firmware, p.firmware && m.firmware && p.firmware !== m.firmware
+      ? `DriveWare 2.6.2 was built for firmware ${p.firmware}; other versions may differ` : null),
+    h("form", { class: "inline-form", onsubmit: act(async (e) => { e.preventDefault(); drafts.deviceName = null; await session().renameDevice(nameInput.value); }) },
       h("span", { class: "k" }, "Name"), nameInput, h("button", { disabled: m.deviceName == null }, "Rename")),
     h("details", { class: "supports" }, h("summary", {}, "Link details"),
       kv("Addresses", m.hostAddr == null ? null : `host ${addr(m.hostAddr)} · device ${addr(m.deviceAddr)}`,
-        m.addressesFrom === "fallback" ? "No NETWORK_IDENTIFY received; using the fallback addresses from Options" : "From NETWORK_IDENTIFY"),
+        { fallback: "No NETWORK_IDENTIFY or DID_CONFIG received; using the fallback addresses from Options",
+          identify: "From NETWORK_IDENTIFY", network: "From the network master's NETWORK_DID_CONFIG" }[m.addressesFrom]),
       kv("Address source", m.addressesFrom),
-      kv("Protocol gen.", m.generation),
-      kv("Utility block", m.utilityBytes == null ? null : `${m.utilityBytes} bytes (layout unmapped)`),
+      kv("Model family", p.family, "Models DriveWare handles alike (re/PROTOCOL.md 4.1)"),
+      kv("DriveWare built for", p.firmware && `firmware ${p.firmware}`),
+      kv("Protocol gen.", m.generation ?? (m.addressesFrom === "network" ? "not sent on a network" : null)),
+      kv("Utility block", m.utilityBytes == null ? null
+        : `${m.utilityBytes} bytes (${m.utilityLayout ?? "unknown"} layout${m.securityLevel != null ? `, security level ${m.securityLevel}` : ""})`,
+        p.utility && m.utilityBytes != null && p.utility !== m.utilityBytes ? `DriveWare expects ${p.utility} bytes from this model` : null),
       h("h3", {}, "Optional requests answered"),
       kv("Input type (0x97)", yesNo(m.supports.inputType)),
       kv("Prompt (0x99)", yesNo(m.supports.prompt)),
@@ -259,22 +305,31 @@ function renderOutputs() {
     return;
   }
   const busy = m.muteMask == null;
+  const outputs = outputCount(m);
   const grid = h("div", { class: "mute-grid" });
-  for (let i = 0; i < 6; i++) {
+  grid.style.gridTemplateColumns = `repeat(${outputs % 3 === 0 ? 3 : Math.min(outputs, 4)}, 1fr)`;
+  for (let i = 0; i < outputs; i++) {
     const muted = !!(m.muteMask & (1 << i));
     grid.append(h("button", {
       class: `mute ${muted ? "on" : ""}`,
       "aria-pressed": String(muted),
       disabled: busy,
-      onclick: act(() => ctx.session.setMute(i, !muted)),
+      onclick: act(() => session().setMute(i, !muted)),
     }, h("span", {}, `Out ${i + 1}`), h("small", { class: "led" }, muted ? "MUTED" : "ON")));
   }
   el.append(grid, h("p", { class: "muted small" }, "Mute bit order is inferred: bit 0 = Out 1."), h("button", {
     class: `mute system ${m.systemMute ? "on" : ""}`,
     "aria-pressed": String(!!m.systemMute),
     disabled: m.systemMute == null,
-    onclick: act(() => ctx.session.setSystemMute(!m.systemMute)),
+    onclick: act(() => session().setSystemMute(!m.systemMute)),
   }, m.systemMute ? "System muted. Click to unmute" : "Mute all outputs"));
+}
+
+// From the model table; for an unknown model, from the highest output channel in the chain.
+function outputCount(m) {
+  if (m.profile.outputs) return m.profile.outputs;
+  const chans = m.fx.map((b) => b.out).filter((c) => c != null);
+  return chans.length ? Math.min(8, Math.max(...chans) + 1) : 6;
 }
 
 function renderPrograms() {
@@ -285,12 +340,12 @@ function renderPrograms() {
     el.append(h("p", { class: "muted" }, ctx ? "Programs are not read in listen-only mode." : "The program list loads after connecting."));
     return;
   }
-  // Manual 3.4 / A.6: programs 1-25 are User, 26-50 Factory (read-only; from the factory the user
-  // programs are copies of them). The wire index is taken as the panel number minus one and the
-  // first GLOBAL_DATA count as the user count (inferred, see re/PROTOCOL.md 3).
+  // 260 manual 3.4 / A.6: programs 1-25 are User, 26-50 Factory (read-only; from the factory the
+  // user programs are copies of them). The wire index is taken as the panel number minus one and
+  // the first GLOBAL_DATA count as the user count (inferred, see re/PROTOCOL.md 4.2), for every model.
   const users = m.counts?.a ?? m.programs.length;
   if (m.counts) el.append(h("p", { class: "muted small" }, `${m.counts.a} user + ${m.counts.b} factory programs (global data ${m.counts.a}/${m.counts.b}/${m.counts.c})`));
-  const busy = !!ctx.session.busy;
+  const busy = !!session().busy;
   const list = h("ol", { class: "program-list", start: 1 });
   m.programs.forEach((name, n) => {
     const current = n === m.currentProgram;
@@ -300,14 +355,14 @@ function renderPrograms() {
         class: "link",
         disabled: busy || current,
         title: current ? "Current program" : "Retrieve and load this program",
-        onclick: act(() => ctx.session.loadProgram(n)),
+        onclick: act(() => session().loadProgram(n)),
       },
       h("span", { class: "num", title: n < users ? "User program" : "Factory program (read-only)" }, String(n + 1)),
       h("span", { class: "pname" }, name == null ? "…" : name || "(empty)"))));
   });
   el.append(list);
 
-  // Store: user slots only. The 260 redirects a store to factory program 26-50 to user 1-25.
+  // Store: user slots only. The 260 redirects a store aimed at factory program 26-50 to user 1-25.
   const slots = m.programs.map((name, n) => ({ name, n })).filter(({ n }) => n < users);
   if (!slots.length) return;
   const slot = h("select", { "aria-label": "User program slot" },
@@ -324,7 +379,7 @@ function renderPrograms() {
       const existing = m.programs[n];
       if (existing && !confirm(`Overwrite user program ${n + 1} “${existing}” on the device?`)) return;
       drafts.programName = null;
-      await ctx.session.storeProgram(n, name.value.trim());
+      await session().storeProgram(n, name.value.trim());
     }),
   }, h("h3", {}, "Store current settings"), slot, name, h("button", { disabled: busy }, "Store")));
 }
@@ -452,10 +507,10 @@ function blockButton(b, label, withRouting = false) {
 
 // A block whose first on/off parameter is 0 is drawn bypassed (dashed outline).
 function paintChip(el, b) {
-  const off = b.params.find((p) => KNOWN_RANGES[p.inputType]?.toggle)?.value === 0;
+  const off = b.params.find((p) => rangeOf(p.inputType)?.toggle)?.value === 0;
   el.classList.toggle("off", off);
   el.querySelector(".chip-meta").textContent =
-    `${el.withRouting && b.in != null ? `in ${b.in + 1} → out ${b.out + 1} · ` : ""}${off ? "off · " : ""}${b.params.length} params`;
+    `${el.withRouting && b.in != null ? `in ${b.in + 1} → out ${b.out + 1} · ` : ""}${off ? "off · " : ""}${b.params.length} param${b.params.length === 1 ? "" : "s"}`;
 }
 
 function paintMuteLeds() {
@@ -494,7 +549,7 @@ function renderBlock() {
       h("h2", {}, ctx ? "Listening only" : "No device connected"),
       h("p", { class: "muted" }, ctx
         ? "Nothing is sent in this mode. Incoming bytes appear in the traffic log below."
-        : "Connect the DriveRack 260 with a null-modem DB-9 cable (38400 8N1), or run the simulator to try the editor. The signal flow appears here once the chain has been read."),
+        : "Connect a DriveRack (480, 481, 482, 442, 240, 241, 260 or 220i) with a null-modem DB-9 cable (38400 8N1), or run the simulator to try the editor. The signal flow appears here once the chain has been read."),
       !ctx && h("button", { onclick: runSimulator }, "Run simulator")));
     return;
   }
@@ -508,9 +563,9 @@ function renderBlock() {
       h("h2", {}, b.name ?? `Block ${b.index + 1}`),
       h("p", { class: "muted small" },
         `FX ${b.index} · type ${b.type == null ? "?" : `0x${hex(b.type)}`} · descriptor ${b.descriptor ? hexBytes(b.descriptor) : "?"}`)),
-    h("button", { disabled: !!ctx.session.busy, onclick: act(() => ctx.session.refreshFx(b.index)) }, "Re-read from device")));
+    h("button", { disabled: !!session().busy, onclick: act(() => session().refreshFx(b.index)) }, "Re-read from device")));
 
-  const faders = b.params.filter((p) => KNOWN_RANGES[p.inputType]?.fader);
+  const faders = b.params.filter((p) => rangeOf(p.inputType)?.fader);
   if (faders.length >= 8) {
     const bank = h("div", { class: "fader-bank" });
     for (const p of faders) bank.append(faderStrip(b.index, p));
@@ -521,17 +576,17 @@ function renderBlock() {
   graphShown = peq.bands.length > 0 || xover.bands.length > 0;
   if (xover.bands.length) {
     const graph = xoverGraph(xover, {
-      write: (p, v) => ctx?.session?.setParam(b.index, p.index, v),
-      limit: (p) => KNOWN_RANGES[p.inputType]?.max ?? 65535,
+      write: (p, v) => session()?.setParam(b.index, p.index, v),
+      limit: (p) => rangeOf(p.inputType)?.max ?? 65535,
     });
     el.append(graph.el);
     for (const p of graph.params) addUpdater(`${b.index}:${p.index}`, graph.update);
   }
   if (peq.bands.length) {
-    const sw = b.params.find((p) => KNOWN_RANGES[p.inputType]?.toggle);
+    const sw = b.params.find((p) => rangeOf(p.inputType)?.toggle);
     const graph = peqGraph(peq, {
-      write: (p, v) => ctx?.session?.setParam(b.index, p.index, v),
-      limit: (p) => KNOWN_RANGES[p.inputType]?.max ?? 65535,
+      write: (p, v) => session()?.setParam(b.index, p.index, v),
+      limit: (p) => rangeOf(p.inputType)?.max ?? 65535,
       enabled: () => sw?.value !== 0,
     });
     el.append(graph.el);
@@ -546,12 +601,12 @@ function renderBlock() {
 }
 
 function paramRow(fx, p) {
-  const range = KNOWN_RANGES[p.inputType];
+  const range = rangeOf(p.inputType);
   const readout = h("span");
   const text = h("td", { class: "devtext" }, readout);
   const raw = h("span", { class: "raw" });
   let control;
-  const write = (v) => ctx?.session?.setParam(fx, p.index, v);
+  const write = (v) => session()?.setParam(fx, p.index, v);
 
   if (range?.toggle) {
     control = h("input", { type: "checkbox", class: "switch", onchange: (e) => write(e.target.checked ? 1 : 0), "aria-label": p.prompt ?? `Parameter ${p.index}` });
@@ -595,17 +650,17 @@ function paramRow(fx, p) {
 }
 
 function faderStrip(fx, p) {
-  const range = KNOWN_RANGES[p.inputType];
+  const range = rangeOf(p.inputType);
   const label = (p.prompt ?? `#${p.index}`).replace(/ Hz$/, "");
   const text = h("output", { class: "fader-text" });
   const centre = () => {
     input.value = range.max / 2;
-    ctx?.session?.setParam(fx, p.index, range.max / 2);
+    session()?.setParam(fx, p.index, range.max / 2);
   };
   const input = h("input", {
     type: "range", min: 0, max: range.max, step: 1, class: "vfader",
     "aria-label": p.prompt ?? `Parameter ${p.index}`,
-    oninput: (e) => ctx?.session?.setParam(fx, p.index, Number(e.target.value)),
+    oninput: (e) => session()?.setParam(fx, p.index, Number(e.target.value)),
     ondblclick: centre,
     onkeydown: (e) => e.key === "0" && centre(),
     title: "Double-click or press 0 to centre",
@@ -712,7 +767,7 @@ function createLog() {
     },
     export() {
       const lines = entries.map((e) => `${(e.t / 1000).toFixed(3)}\t${e.dir}\t${e.summary}\t${e.hex ?? ""}`);
-      const blob = new Blob([`# DriveRack 260 web prototype traffic log, ${new Date().toISOString()}\n${lines.join("\n")}\n`], { type: "text/plain" });
+      const blob = new Blob([`# DriveWare web port traffic log, ${new Date().toISOString()}\n${lines.join("\n")}\n`], { type: "text/plain" });
       const a = h("a", { href: URL.createObjectURL(blob), download: `driverack-log-${Date.now()}.txt` });
       a.click();
       URL.revokeObjectURL(a.href);
@@ -727,8 +782,8 @@ function setupRawSender() {
   $("raw-form").addEventListener("submit", act(async (e) => {
     e.preventDefault();
     $("raw-error").textContent = "";
-    const session = ctx?.session;
-    if (!session || ctx.link.state !== "active") throw new Error("Link is not up.");
+    const unit = session();
+    if (!unit || ctx.link.state !== "active") throw new Error("Link is not up.");
     const msgText = $("raw-msg").value.trim().replace(/^MSG_/, "");
     const id = MSG[msgText] ?? parseNum(msgText);
     if (id == null || id > 0xffff) {
@@ -740,9 +795,9 @@ function setupRawSender() {
       $("raw-error").textContent = "Data must be hex bytes";
       return;
     }
-    const m = session.model;
+    const m = unit.model;
     const dst = $("raw-dst").value.trim() ? parseNum($("raw-dst").value) : m.deviceAddr;
-    await session.send(payload(id, data), {
+    await unit.send(payload(id, data), {
       dst: dst ?? parseNum($("opt-dev").value),
       src: m.hostAddr ?? parseNum($("opt-host").value),
       reliable: $("raw-reliable").checked,
@@ -782,9 +837,17 @@ document.addEventListener("click", (e) => {
 });
 for (const id of ["log-ctrl", "log-keepalive"]) $(id).addEventListener("change", () => log.rerender());
 setupRawSender();
+$("opt-sim-model").append(...SIM_MODELS.map((name) => h("option", { value: name, selected: name === "DriveRack 260" }, name)));
 updateButtons();
 renderAll();
 if (!SerialTransport.supported) {
   $("banner").append(" ", h("strong", {}, "This browser has no Web Serial API; only the simulator will work here (use desktop Chrome or Edge)."));
 }
-if (new URLSearchParams(location.search).has("sim")) runSimulator();
+// ?sim starts the simulator; ?sim=480&units=3 picks the model and network size.
+const query = new URLSearchParams(location.search);
+if (query.has("sim")) {
+  const want = query.get("sim");
+  if (want) $("opt-sim-model").value = SIM_MODELS.find((n) => n.endsWith(` ${want}`)) ?? "DriveRack 260";
+  if (query.get("units")) $("opt-sim-units").value = query.get("units");
+  runSimulator();
+}
