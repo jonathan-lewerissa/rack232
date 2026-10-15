@@ -1,0 +1,10 @@
+{
+  "name": "driverack-260-web",
+  "private": true,
+  "type": "module",
+  "description": "Vanilla JS prototype controller for the dbx DriveRack 260 (Web Serial)",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "test": "node --test test/*.test.js"
+  }
+}

@@ -1,0 +1,143 @@
+msg_id	min_len	max_len	name	pc_rx	pc_tx	payload_notes
+0x0000	2	2	MSG_NETWORK_PING	ignored		
+0x0001	18	18	MSG_NETWORK_DID_CONFIG	handled		rx: sets PC address = dst field
+0x0002	2	4	MSG_NETWORK_IDENTIFY	handled		rx: PC addr = dst, device addr = src, [2]=protocol generation
+0x0003	4	4	MSG_GUI_IDENTIFY		sends	
+0x000e	2	2	MSG_NETWORK_EVENT_NOW_INACTIVE	handled		internal only
+0x000f	2	2	MSG_NETWORK_EVENT_NOW_ACTIVE	handled		internal only
+0x0010	2	2	MSG_SYSTEM_DO_SOFT_RESET	ignored		
+0x0011	2	2	MSG_SYSTEM_DO_FACTORY_RESET	ignored		
+0x0012	2	2	MSG_SYSTEM_DID_POWER_ON_RESET	ignored		
+0x0013	2	2	MSG_SYSTEM_DID_SOFT_RESET	ignored		
+0x0014	2	2	MSG_SYSTEM_DID_FACTORY_RESET	ignored		
+0x0015	3	3	MSG_SYSTEM_DO_START_FLASH_DOWNLOAD	ignored		
+0x0016	3	3	MSG_SYSTEM_DID_START_FLASH_DOWNLOAD	ignored		
+0x0017	2	2	MSG_SYSTEM_DO_END_FLASH_DOWNLOAD	ignored		
+0x0018	7	7	MSG_SYSTEM_DID_END_FLASH_DOWNLOAD	ignored		
+0x0019	8	256	MSG_SYSTEM_DO_WRITE_FLASH	ignored		
+0x0024	4	4	MSG_SYSTEM_DID_WRITE_FLASH	ignored		
+0x001a	2	2	MSG_SYSTEM_REQUEST_DEVICE_DATA	ignored	sends	
+0x001b	10	10	MSG_SYSTEM_REPLY_DEVICE_DATA	handled		[3..6]=ASCII firmware digits (1510 = 1.510), [7]=device type char
+0x001c	4	256	MSG_SYSTEM_WRITE_DEVICE_NAME	ignored	sends	
+0x001d	2	2	MSG_SYSTEM_REQUEST_DEVICE_NAME	ignored	sends	
+0x001e	3	256	MSG_SYSTEM_REPLY_DEVICE_NAME	handled	sends	[2..]=device name
+0x001f	2	2	MSG_SYSTEM_DO_ATTACH	ignored	sends	
+0x0020	2	2	MSG_SYSTEM_DO_RELEASE	ignored	sends	
+0x0021	2	2	MSG_SYSTEM_REQUEST_STATE	ignored		
+0x0022	5	5	MSG_SYSTEM_REPLY_STATE	ignored		
+0x0023	5	5	MSG_SYSTEM_WRITE_STATE	ignored		
+0x002d	5	5	MSG_ERROR_INVALID_MESSAGE	ignored		
+0x002e	5	5	MSG_ERROR_INVALID_LENGTH	ignored		
+0x002f	10	10	MSG_ERROR_INVALID_PARAMETER	ignored		
+0x0030	8	256	MSG_DEBUG_WRITE_DSP_MEMORY	ignored		
+0x0031	9	9	MSG_DEBUG_REQUEST_DSP_MEMORY	ignored		
+0x0032	8	256	MSG_DEBUG_REPLY_DSP_MEMORY	ignored		
+0x0033	2	256	MSG_DEBUG_REQUEST_RESPONSE	ignored		
+0x0034	2	256	MSG_DEBUG_REPLY_RESPONSE	ignored		
+0x003a	6	6	MSG_KPS_KEYPRESS	handled	sends	
+0x003e	6	6	MSG_KPS_COMMAND	handled		
+0x003b	12	12	MSG_KPS_CONFIG_REPLY	handled		
+0x003c	2	2	MSG_KPS_CONFIG_REQUEST	ignored		
+0x003d	76	76	MSG_KPS_LUT_REPLY	handled		
+0x0040	2	2	MSG_SYSCON_DATA_REQUEST	handled	sends	
+0x0041	54	54	MSG_SYSCON_? (name unresolved)	handled	sends	
+0x0042	2	2	MSG_SYSCON_CONFIG_REQUEST	handled	sends	
+0x0047	2	2	MSG_SYSCON_REQUEST		sends	
+0x0049	2	2	MSG_SYSCON_CLEAR		sends	
+0x0045	2	2	MSG_SYSCON_? (name unresolved)	handled	sends	
+0x0043	36	36	MSG_SYSCON_CONFIG_REPLY	handled	sends	
+0x0044	6	6	MSG_SYSCON_? (name unresolved)	handled	sends	
+0x0048	3	3	MSG_SYSCON_REPLY	handled		
+0x0046	13	13	MSG_SYSCON_? (name unresolved)	handled	sends	
+0x004d	2	2	MSG_SYSCON_? (name unresolved)	handled	sends	
+0x004e	130	130	MSG_SYSCON_? (name unresolved)	handled	sends	
+0x004f	130	130	MSG_SYSCON_? (name unresolved)	handled	sends	
+0x0050	2	2	MSG_PROGRAM_REQUEST_CURRENT	ignored	sends	
+0x0051	3	3	MSG_PROGRAM_REPLY_CURRENT	handled		[2]=current program number
+0x0052	2	2	MSG_PROGRAM_REQUEST_LOADED	ignored		
+0x0053	3	3	MSG_PROGRAM_REPLY_LOADED	ignored		
+0x0054	2	2	MSG_PROGRAM_REQUEST_CURRENT_NAME	ignored	sends	
+0x0055	4	256	MSG_PROGRAM_REPLY_CURRENT_NAME		sends	[4..]=current program name
+0x0056	3	3	MSG_PROGRAM_REQUEST_NAME	ignored	sends	
+0x0057	4	256	MSG_PROGRAM_REPLY_NAME			[2]=program number, [4..]=name
+0x0058	4	256	MSG_PROGRAM_DO_STORE		sends	tx: [2]=program no, [3]=mode 0/0xFF, [4..]=name
+0x0059	4	4	MSG_PROGRAM_DID_STORE	handled		[2]=program number stored
+0x005a	3	3	MSG_PROGRAM_DO_RETRIEVE	ignored	sends	tx: [2]=program number
+0x005b	3	3	MSG_PROGRAM_DID_RETRIEVE	handled		[2]=program number
+0x005c	2	2	MSG_PROGRAM_DO_LOAD	handled	sends	
+0x005d	5	5	MSG_PROGRAM_DID_LOAD	handled		[2]=program number loaded
+0x005e	3	3	MSG_PROGRAM_REQUEST	ignored	sends	
+0x005f	6	6	MSG_PROGRAM_REPLY_UPLOAD_HEADER	handled		[2]=u8,[3]=u8,[4..5]=u16
+0x0060	6	256	MSG_PROGRAM_REPLY_BULK_DATA	handled		[2],[3]=u8, data from [6]
+0x0061	6	6	MSG_PROGRAM_DO_START_DOWNLOAD	ignored		
+0x0062	8	256	MSG_PROGRAM_WRITE_BULK_DATA	ignored		
+0x0063	3	3	MSG_PROGRAM_DO_END_DOWNLOAD	ignored		
+0x0064	3	3	MSG_PROGRAM_DID_END_DOWNLOAD	ignored		
+0x0065	3	3	MSG_PROGRAM_REQUEST_FORMAT	ignored	sends	
+0x0066	25	25	MSG_PROGRAM_REPLY_FORMAT	handled		[2]=u8, then u16/u8 fields (see PROTOCOL.md)
+0x0067	2	2	MSG_PROGRAM_REQUEST_GLOBAL_DATA	ignored	sends	
+0x0068	8	8	MSG_PROGRAM_REPLY_GLOBAL_DATA	handled		[2..3],[4..5],[6..7]=u16; [6..7]=user program count
+0x0070	3	3	MSG_CONFIG_REQUEST_ALL	ignored	sends	tx: [2]=program number
+0x0071	2	2	MSG_CONFIG_DO_START	ignored	sends	
+0x0072	2	2	MSG_CONFIG_DO_END	ignored	sends	
+0x0073	10	256	MSG_CONFIG_WRITE_FX_DATA	ignored	sends	
+0x0074	3	3	MSG_CONFIG_REQUEST_FX_DATA	ignored	sends	
+0x0075	10	10	MSG_CONFIG_REPLY_FX_DATA	handled		[2]=FX index, [3..9]=FX descriptor
+0x0076	3	3	MSG_CONFIG_WRITE_NUMBER_FX	ignored	sends	
+0x0077	2	2	MSG_CONFIG_REQUEST_NUMBER_FX	ignored	sends	
+0x0078	3	3	MSG_CONFIG_REPLY_NUMBER_FX	handled		[2]=number of FX
+0x0079	3	3	MSG_CONFIG_REQUEST_FX_NAME	ignored	sends	
+0x007a	4	256	MSG_CONFIG_REPLY_FX_NAME			[2]=FX index, [4..]=FX name
+0x007b	3	3	MSG_CONFIG_REQUEST_FX_IN_OUT	ignored	sends	
+0x007c	5	5	MSG_CONFIG_REPLY_FX_IN_OUT	handled		[2]=FX index, [3]=in channel, [4]=out channel
+0x007d	2	2	MSG_CONFIG_REQUEST_CURRENT_PRE_EQ	ignored		
+0x007e	45	45	MSG_CONFIG_REPLY_CURRENT_PRE_EQ_31	ignored		
+0x007f	3	3	MSG_CONFIG_REQUEST_NUMBER_PARAMS	ignored		
+0x0080	4	4	MSG_CONFIG_REPLY_NUMBER_PARAMS	ignored		
+0x0081	2	2	MSG_COHERENCY_REQUEST			
+0x0082	6	63	MSG_COHERENCY_NUM_PARAMS_REPLY			
+0x0083	5	44	MSG_COHERENCY_CUR_VALS_REPLY			
+0x0086	3	3	MSG_COHERENCY_PROGRAM_REQUEST			
+0x0087	7	7	MSG_COHERENCY_PROGRAM_REPLY			
+0x0090	2	2	MSG_PARAM_REQUEST_ALL	ignored	sends	
+0x0091	4	256	MSG_PARAM_WRITE_ALL_IN_FX	ignored	sends	tx: [2]=FX index, [3]=count, [4..]=u16 values
+0x0092	3	3	MSG_PARAM_REQUEST_ALL_IN_FX	ignored	sends	tx: [2]=FX index
+0x0093	5	255	MSG_PARAM_REPLY_ALL_IN_FX	handled		[3]=FX index, [5..]=u16 values, count=(len-5)/2
+0x0094	6	6	MSG_PARAM_WRITE	ignored	sends	tx: [2]=FX index, [3]=param index, [4..5]=u16 value
+0x0095	4	4	MSG_PARAM_REQUEST	ignored		
+0x0096	8	8	MSG_PARAM_REPLY	handled		[3]=FX index, [4]=param index, [6..7]=u16 value
+0x0097	4	4	MSG_PARAM_REQUEST_INPUT_TYPE	ignored	sends	tx: [2]=FX index, [3]=param index
+0x0098	5	5	MSG_PARAM_REPLY_INPUT_TYPE	handled		[2]=FX index, [3]=param index, [4]=input type
+0x0099	4	4	MSG_PARAM_REQUEST_PROMPT_STRING	ignored	sends	tx: [2]=FX index, [3]=param index
+0x009a	4	256	MSG_PARAM_REPLY_PROMPT_STRING	handled		[2]=FX index, [3]=param index, [4..]=prompt string
+0x009b	3	3	MSG_PARAM_REQUEST_MAX_SELECT	ignored		
+0x009c	5	5	MSG_PARAM_REPLY_MAX_SELECT	ignored		
+0x00a0	4	4	MSG_BUTTON_DO_PRESS	ignored		
+0x00b0	3	3	MSG_UI_DO_ATTACH	ignored		
+0x00b1	2	2	MSG_UI_DO_RELEASE	ignored		
+0x00b2	4	256	MSG_UI_DO_BUNDLE	ignored		
+0x00b3	2	2	MSG_CONFIG_MUTE_STATUS_REQUEST	ignored	sends	
+0x00b4	3	3	MSG_CONFIG_MUTE_STATUS_REPLY	handled		[2]=output mute bitmask
+0x00b5	3	3	MSG_CONFIG_WRITE_SYSTEM_MUTE		sends	tx: [2]=mute flag
+0x00b6	3	3	MSG_CONFIG_SYSTEM_MUTE_REPLY	handled		[2]=1 muted, 0x81 also muted
+0x00b7	2	2	MSG_CONFIG_SYSTEM_MUTE_REQUEST		sends	
+0x00b8	3	3	MSG_CONFIG_WRITE_MUTE_STATUS		sends	
+0x00c0	2	2	MSG_UTILITY_REQUEST		sends	
+0x00c1	76	76	MSG_UTILITY_REPLY		sends	76 bytes; variants of 0x10/0x4c/0x65/0xdb bytes by device generation
+0x00a4	20	20	MSG_PARAM_REPLY_STRING	handled		[4..19]=16-char value string
+0x00a3	4	4	MSG_PARAM_REQUEST_REPLY_STRING	ignored		
+0x00a2	21	21	MSG_PARAM_TYPE_REPLY_STRING	handled		[5..20]=16-char type string
+0x00a1	5	5	MSG_PARAM_REQUEST_TYPE_REPLY_STRING	ignored		
+0x00c2	2	2	MSG_AFL_REQUEST	handled	sends	
+0x00c3	256	256	MSG_AFL_REPLY	handled	sends	
+0x00a5	4	4	MSG_AFB_REQUEST	ignored		
+0x00a6	12	12	MSG_AFB_REPLY	handled	sends	
+0x00c4	2	2	MSG_UTILITY_485FD_PROTOCOL_REQUEST	handled	sends	
+0x00c5	3	3	MSG_UTILITY_485FD_PROTOCOL_REPLY	handled	sends	[2]=485 protocol flag
+0x008d	69	69	MSG_CONFIG_REPLY_OUTPUT_NAME	handled	sends	
+0x00d0	8	8	MSG_CHANNEL_CONFIG_REQUEST		sends	
+0x00d1	8	8	MSG_CHANNEL_CONFIG_REPLY	handled		
+0x2000	2	255	MSG_CHANNEL_0			
+0x2001	2	255	MSG_CHANNEL_1			
+0x2002	2	255	MSG_CHANNEL_2			
+0x2003	2	255	MSG_CHANNEL_3			

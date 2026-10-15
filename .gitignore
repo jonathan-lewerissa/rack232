@@ -1,0 +1,5 @@
+re/out/
+*.exe
+docs/*.pdf
+node_modules/
+screenshots/
